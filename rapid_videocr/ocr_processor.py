@@ -245,8 +245,14 @@ class OCRProcessor:
             ocr_result = future1.result()
             ocr_result2 = future2.result()
 
-        if ocr_result.boxes is None or ocr_result2.boxes is None:
+        if ocr_result.boxes is None and ocr_result2.boxes is None:
             return None, None, None, None
+
+        if ocr_result.boxes is None:
+            return None, None, ocr_result2.boxes, ocr_result2.txts
+
+        if ocr_result2.boxes is None:
+            return ocr_result.boxes, ocr_result.txts, None, None
 
         return (
             ocr_result.boxes, ocr_result.txts,
