@@ -59,7 +59,7 @@ class OCRProcessor:
             )
             txts2 = (
                 self.process_same_line(dt_boxes2, rec_res2)
-                if dt_boxes is not None
+                if dt_boxes2 is not None
                 else ""
             )
             final_txts = txts if len(txts) >= len(txts2) else txts2
