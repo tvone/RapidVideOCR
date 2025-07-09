@@ -17,12 +17,15 @@ from .utils.utils import (
     padding_img,
     read_img,
 )
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 
 class OCRProcessor:
-    def __init__(self, ocr_params: Optional[Dict] = None, batch_size: int = 10):
+    def __init__(self, ocr_params: Optional[Dict] = None, ocr_params2: Optional[Dict] = None, batch_size: int = 10):
         self.logger = Logger(logger_name=__name__).get_log()
         self.ocr_engine = self._init_ocr_engine(ocr_params)
+        self.ocr_engine2 = self._init_ocr_engine(ocr_params2)
         self.batch_size = batch_size
 
     def _init_ocr_engine(self, ocr_params: Optional[Dict] = None) -> RapidOCR:
@@ -48,13 +51,19 @@ class OCRProcessor:
             ass_time_str = self._get_ass_timestamp(img_path)
             img = self._preprocess_image(img_path)
 
-            dt_boxes, rec_res = self.get_ocr_result(img)
+            dt_boxes, rec_res, dt_boxes2, rec_res2 = self.get_ocr_result(img)
             txts = (
                 self.process_same_line(dt_boxes, rec_res)
                 if dt_boxes is not None
                 else ""
             )
-            rec_results.append([i, time_str, txts, ass_time_str])
+            txts2 = (
+                self.process_same_line(dt_boxes2, rec_res2)
+                if dt_boxes is not None
+                else ""
+            )
+            final_txts = txts if len(txts) >= len(txts2) else txts2
+            rec_results.append([i, time_str, final_txts, ass_time_str])
         return rec_results
 
     @staticmethod
@@ -226,10 +235,23 @@ class OCRProcessor:
     def get_ocr_result(
         self, img: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[Tuple[str]]]:
-        ocr_result = self.ocr_engine(img)
-        if ocr_result.boxes is None:
-            return None, None
-        return ocr_result.boxes, ocr_result.txts
+
+        def run_engine(engine):
+            return engine(img)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future1 = executor.submit(run_engine, self.ocr_engine)
+            future2 = executor.submit(run_engine, self.ocr_engine2)
+            ocr_result = future1.result()
+            ocr_result2 = future2.result()
+
+        if ocr_result.boxes is None or ocr_result2.boxes is None:
+            return None, None, None, None
+
+        return (
+            ocr_result.boxes, ocr_result.txts,
+            ocr_result2.boxes, ocr_result2.txts
+        )
 
     def process_same_line(self, dt_boxes: np.ndarray, rec_res: List[str]) -> str:
         if len(rec_res) == 1:
