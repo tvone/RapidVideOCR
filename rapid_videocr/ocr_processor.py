@@ -267,9 +267,9 @@ class OCRProcessor:
         for engine in self.ocr_engine:
             ocr_result = engine(img)
             if ocr_result.boxes is None:
-                results.append((ocr_result.boxes, ocr_result.txts))
-            else:
                 results.append((None, None))
+            else:
+                results.append((ocr_result.boxes, ocr_result.txts))
         return results
 
     def process_same_line(self, dt_boxes: np.ndarray, rec_res: List[str]) -> str:
