@@ -20,15 +20,14 @@ class RapidVideOCRInput:
     is_batch_rec: bool = False
     batch_size: int = 10
     out_format: str = OutputFormat.ALL.value
-    ocr_params: Optional[Dict[str, Any]] = None
-    ocr_params2: Optional[Dict[str, Any]] = None
+    ocr_params_list: Optional[List[Dict]] = None
 
 class RapidVideOCR:
     def __init__(self, input_params: RapidVideOCRInput):
         self.logger = Logger(logger_name=__name__).get_log()
 
         self.ocr_processor = OCRProcessor(
-            ocr_params=input_params.ocr_params, ocr_params2=input_params.ocr_params, batch_size=input_params.batch_size
+            ocr_params_list=input_params.ocr_params_list, batch_size=input_params.batch_size
         )
 
         self.cropper = CropByProject()

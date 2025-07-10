@@ -22,10 +22,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 class OCRProcessor:
-    def __init__(self, ocr_params: Optional[Dict] = None, ocr_params2: Optional[Dict] = None, batch_size: int = 10):
+    def __init__(self, ocr_params_list: Optional[List[Dict]] = None, batch_size: int = 10):
         self.logger = Logger(logger_name=__name__).get_log()
-        self.ocr_engine = self._init_ocr_engine(ocr_params)
-        self.ocr_engine2 = self._init_ocr_engine(ocr_params2)
+        self.ocr_engine = self._init_ocr_engine(ocr_params_list[0])
+        self.ocr_engine2 = self._init_ocr_engine(ocr_params_list[1])
         self.batch_size = batch_size
 
     def _init_ocr_engine(self, ocr_params: Optional[Dict] = None) -> RapidOCR:
@@ -235,15 +235,8 @@ class OCRProcessor:
     def get_ocr_result(
         self, img: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[Tuple[str]]]:
-
-        def run_engine(engine):
-            return engine(img)
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future1 = executor.submit(run_engine, self.ocr_engine)
-            future2 = executor.submit(run_engine, self.ocr_engine2)
-            ocr_result = future1.result()
-            ocr_result2 = future2.result()
+        ocr_result = self.ocr_engine(img)
+        ocr_result2 = self.ocr_engine2(img)
 
         if ocr_result.boxes is None and ocr_result2.boxes is None:
             return None, None, None, None
