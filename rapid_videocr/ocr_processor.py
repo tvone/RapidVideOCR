@@ -17,15 +17,13 @@ from .utils.utils import (
     padding_img,
     read_img,
 )
-import os
-from concurrent.futures import ThreadPoolExecutor
 
 
 class OCRProcessor:
     def __init__(self, ocr_params_list: Optional[List[Dict]] = None, batch_size: int = 10):
         self.logger = Logger(logger_name=__name__).get_log()
-        self.ocr_engine = [self._init_ocr_engine(ocr_params) for ocr_params in ocr_params_list]
         self.batch_size = batch_size
+        self.ocr_params_list = ocr_params_list
 
     def _init_ocr_engine(self, ocr_params: Optional[Dict] = None) -> RapidOCR:
         return RapidOCR(params=ocr_params)
@@ -34,6 +32,8 @@ class OCRProcessor:
         self, img_list: List[Path], is_batch_rec: bool, is_txt_dir: bool
     ) -> Tuple[List[str], List[str], List[str]]:
         self.is_txt_dir = is_txt_dir
+        self.is_batch_rec = is_batch_rec
+        self.ocr_engines = [self._init_ocr_engine(self.ocr_params_list[0])] if is_batch_rec else [self._init_ocr_engine(p) for p in self.ocr_params_list]
         process_func = self.batch_rec if is_batch_rec else self.single_rec
         rec_results = process_func(img_list)
         srt_results = self._generate_srt_results(rec_results)
@@ -49,21 +49,8 @@ class OCRProcessor:
             time_str = self._get_srt_timestamp(img_path)
             ass_time_str = self._get_ass_timestamp(img_path)
             img = self._preprocess_image(img_path)
-
-            # dt_boxes, rec_res, dt_boxes2, rec_res2 = self.get_ocr_result(img)
-            # txts = (
-            #     self.process_same_line(dt_boxes, rec_res)
-            #     if dt_boxes is not None
-            #     else ""
-            # )
-            # txts2 = (
-            #     self.process_same_line(dt_boxes2, rec_res2)
-            #     if dt_boxes2 is not None
-            #     else ""
-            # )
-            # final_txts = txts if len(txts) >= len(txts2) else txts2
             results = self.get_ocr_result(img)
-            len_txt = 0
+            max_txt_len = 0
             final_txts = ""
             for idx, (dt_boxes, rec_res) in enumerate(results):
                 txts = (
@@ -71,8 +58,8 @@ class OCRProcessor:
                     if dt_boxes is not None
                     else ""
                 )
-                if len_txt < len(txts):
-                    len_txt = len(txts)
+                if max_txt_len < len(txts):
+                    max_txt_len = len(txts)
                     final_txts = txts
 
             rec_results.append([i, time_str, final_txts, ass_time_str])
@@ -247,30 +234,23 @@ class OCRProcessor:
     def get_ocr_result(
         self, img: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[Tuple[str]]]:
-        # ocr_result = self.ocr_engine(img)
-        # ocr_result2 = self.ocr_engine2(img)
-        #
-        # if ocr_result.boxes is None and ocr_result2.boxes is None:
-        #     return None, None, None, None
-        #
-        # if ocr_result.boxes is None:
-        #     return None, None, ocr_result2.boxes, ocr_result2.txts
-        #
-        # if ocr_result2.boxes is None:
-        #     return ocr_result.boxes, ocr_result.txts, None, None
-        #
-        # return (
-        #     ocr_result.boxes, ocr_result.txts,
-        #     ocr_result2.boxes, ocr_result2.txts
-        # )
-        results = []
-        for engine in self.ocr_engine:
-            ocr_result = engine(img)
+
+        if self.is_batch_rec:
+            ocr_result = self.ocr_engines[0](img)
             if ocr_result.boxes is None:
-                results.append((None, None))
-            else:
-                results.append((ocr_result.boxes, ocr_result.txts))
-        return results
+                return None, None
+            return (
+                    ocr_result.boxes, ocr_result.txts,
+            )
+        else:
+            results = []
+            for engine in self.ocr_engines:
+                ocr_result = engine(img)
+                if ocr_result.boxes is None:
+                    results.append((None, None))
+                else:
+                    results.append((ocr_result.boxes, ocr_result.txts))
+            return results
 
     def process_same_line(self, dt_boxes: np.ndarray, rec_res: List[str]) -> str:
         if len(rec_res) == 1:
