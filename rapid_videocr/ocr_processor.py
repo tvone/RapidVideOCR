@@ -51,22 +51,22 @@ class OCRProcessor:
             ass_time_str = self._get_ass_timestamp(img_path)
             img = self._preprocess_image(img_path)
             results = self.get_ocr_results(img)
-            max_txt_len = 0
+            max_score = 0.0
             final_txts = ""
 
             # Iterate over all OCR results from different configs.
-            for idx, (dt_boxes, rec_res) in enumerate(results):
-                txts = (
-                    self.process_same_line(dt_boxes, rec_res)
-                    if dt_boxes is not None
-                    else ""
-                )
-                # Compare and select the best (longest) recognized text for this image.
-                if max_txt_len < len(txts):
-                    max_txt_len = len(txts)
+            for idx, (dt_boxes, rec_res, rec_scores) in enumerate(results):
+                if dt_boxes is None or rec_scores is None:
+                    continue
+                txts = self.process_same_line(dt_boxes, rec_res)
+                score = rec_scores[0]
+                print(f"Score -> {score} -> {txts}")
+                # Compare and select the best recognized text for this image.
+                if max_score < score:
+                    max_score = score
                     final_txts = txts
-
-            rec_results.append([i, time_str, final_txts, ass_time_str])
+            print(f"Choose -> {final_txts} -> {max_score}")
+            rec_results.append([i, time_str, final_txts, max_score, ass_time_str])
         return rec_results
 
     @staticmethod
@@ -122,24 +122,27 @@ class OCRProcessor:
 
     @staticmethod
     def _generate_srt_results(
-        rec_results: List[Tuple[int, str, str, str]],
+        rec_results: List[Tuple[int, str, str, float, str]],
     ) -> List[str]:
-        return [f"{i+1}\n{time_str}\n{txt}\n" for i, time_str, txt, _ in rec_results]
+        # rec_results[0] = [i, time_str, txts, score, ass_time_str]
+        return [f"{i+1}\n{time_str}\n{txt}\n" for i, time_str, txt, _, _ in rec_results]
 
     @staticmethod
     def _generate_ass_results(
-        rec_results: List[Tuple[int, str, str, str]],
+        rec_results: List[Tuple[int, str, str, float, str]],
     ) -> List[str]:
+        # rec_results[0] = [i, time_str, txts, score, ass_time_str]
         return [
             f"Dialogue: 0,{ass_time_str},Default,,0,0,0,,{txt}"
-            for _, _, txt, ass_time_str in rec_results
+            for _, _, txt, _, ass_time_str in rec_results
         ]
 
     @staticmethod
-    def _generate_txt_result(rec_results: List[Tuple[int, str, str, str]]) -> List[str]:
-        return [f"{txt}\n" for _, _, txt, _ in rec_results]
+    def _generate_txt_result(rec_results: List[Tuple[int, str, str, float, str]]) -> List[str]:
+        # rec_results[0] = [i, time_str, txts, score, ass_time_str]
+        return [f"{txt}\n" for _, _, txt, _, _ in rec_results]
 
-    def batch_rec(self, img_list: List[Path]) -> List[Tuple[int, str, str, str]]:
+    def batch_rec(self, img_list: List[Path]) -> List[Tuple[int, str, str, float, str]]:
         self.logger.info("[OCR] Running with concat recognition.")
 
         img_nums = len(img_list)
@@ -154,41 +157,48 @@ class OCRProcessor:
             results = self.get_ocr_results(concat_img)
 
             if len(results) == 1:
-                dt_boxes, rec_res = results[0]
-                if rec_res is None or dt_boxes is None:
+                dt_boxes, rec_res, rec_scores = results[0]
+                if rec_res is None or dt_boxes is None or rec_scores is None:
                     continue
                 one_batch_rec_results = self._process_batch_results(
-                    start_i, img_coordinates, dt_boxes, rec_res, img_paths
+                    start_i, img_coordinates, dt_boxes, rec_res, rec_scores, img_paths
                 )
                 rec_results.extend(one_batch_rec_results)
                 continue
 
             all_batch_results = defaultdict(list)
             # Iterate over all OCR results from different configs.
-            for idx, (dt_boxes, rec_res) in enumerate(results):
-                if rec_res is None or dt_boxes is None:
+            for idx, (dt_boxes, rec_res, rec_scores) in enumerate(results):
+                if rec_res is None or dt_boxes is None or rec_scores is None:
                     continue
+                print(f"-------------Engine {idx}------------------")
+                print(type(rec_res))
                 one_batch_rec_results = self._process_batch_results(
-                    start_i, img_coordinates, dt_boxes, rec_res, img_paths
+                    start_i, img_coordinates, dt_boxes, rec_res, rec_scores, img_paths
                 )
-                for i, row in enumerate(one_batch_rec_results):
-                    # row = [cur_frame_idx, time_str, txts, ass_time_str]
-                    all_batch_results[i].append(row)
 
-            # Compare and select the best (longest) recognized text for each image.
+                print(f"Rec Score: {rec_scores}")
+                for i, row in enumerate(one_batch_rec_results):
+                    # row = [cur_frame_idx, time_str, txts, score, ass_time_str]
+                    all_batch_results[i].append(row)
+            print("ALL BATCH RESULTS: ")
+            print(all_batch_results)
+            # Compare and select the best recognized text for each image.
             for i in range(len(img_paths)):
                 batch_result = all_batch_results[i]
-                max_txt_len = 0
+                max_score = -1.0
                 final_row = None
                 for row in batch_result:
-                    txts = row[2]  # get text
-                    if len(txts) > max_txt_len:
-                        max_txt_len = len(txts)
+                    score = row[3]
+                    print(f"Score -> {score} -> {row[2]}")
+                    if max_score < score:
+                        max_score = score
                         final_row = row
+                print(f"Final Score -> {max_score} -> {final_row[2]}")
                 if final_row is None:
                     time_str = self._get_srt_timestamp(img_paths[i])
                     ass_time_str = self._get_ass_timestamp(img_paths[i])
-                    final_row = [start_i + i, time_str, "", ass_time_str]
+                    final_row = [start_i + i, time_str, "", 0.0, ass_time_str]
                 rec_results.append(final_row)
 
         return rec_results
@@ -219,46 +229,49 @@ class OCRProcessor:
         img_coordinates: np.ndarray,
         dt_boxes: np.ndarray,
         rec_res: Tuple[str],
+        rec_scores: Tuple[float],
         img_paths: List[Path],
-    ) -> List[Tuple[int, str, str, str]]:
+    ) -> List[Tuple[int, str, str, float, str]]:
         match_dict = self._match_boxes_to_images(
-            img_coordinates, dt_boxes, rec_res, img_paths
+            img_coordinates, dt_boxes, rec_res, rec_scores, img_paths
         )
 
         results = []
         for k, v in match_dict.items():
             cur_frame_idx = start_i + k
             if v:
-                img_path, boxes, recs = list(zip(*v))
+                img_path, boxes, recs, scores = list(zip(*v))
                 time_str = self._get_srt_timestamp(img_path[0])
                 ass_time_str = self._get_ass_timestamp(img_path[0])
                 txts = self.process_same_line(boxes, recs)
+                score = scores[0]
             else:
                 time_str = self._get_srt_timestamp(img_paths[k])
                 ass_time_str = self._get_ass_timestamp(img_paths[k])
                 txts = ""
+                score = 0.0
 
-            results.append([cur_frame_idx, time_str, txts, ass_time_str])
+            results.append([cur_frame_idx, time_str, txts, score, ass_time_str])
         return results
 
     def _match_boxes_to_images(
         self,
         img_coordinates: np.ndarray,
         dt_boxes: np.ndarray,
-        rec_res: List[str],
+        rec_res: Tuple[str],
+        rec_scores: Tuple[float],
         img_paths: List[Path],
-    ) -> Dict[int, List[Tuple[Path, np.ndarray, str]]]:
+    ) -> Dict[int, List[Tuple[Path, np.ndarray, str, float]]]:
         """将检测框匹配到对应图像"""
         match_dict = {k: [] for k in range(len(img_coordinates))}
         visited_idx = set()
 
         for i, frame_boxes in enumerate(img_coordinates):
-            for idx, (dt_box, txt) in enumerate(zip(dt_boxes, rec_res)):
+            for idx, (dt_box, txt, score) in enumerate(zip(dt_boxes, rec_res, rec_scores)):
                 if idx in visited_idx:
                     continue
-
                 if self._is_box_matched(frame_boxes, dt_box):
-                    match_dict[i].append((img_paths[i], dt_box, txt))
+                    match_dict[i].append((img_paths[i], dt_box, txt, score))
                     visited_idx.add(idx)
 
         return match_dict
@@ -270,15 +283,15 @@ class OCRProcessor:
 
     def get_ocr_results(
         self, img: np.ndarray
-    ) -> List[Tuple[Optional[np.ndarray], Optional[Tuple[str]]]]:
+    ) -> List[Tuple[Optional[np.ndarray], Optional[Tuple[str]], Optional[Tuple[float]]]]:
 
         results = []
         for engine in self.ocr_engines:
             ocr_result = engine(img)
             if ocr_result.boxes is None:
-                results.append((None, None))
+                results.append((None, None, None))
             else:
-                results.append((ocr_result.boxes, ocr_result.txts))
+                results.append((ocr_result.boxes, ocr_result.txts, ocr_result.scores))
         return results
 
     def process_same_line(self, dt_boxes: np.ndarray, rec_res: List[str]) -> str:
